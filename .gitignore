@@ -1,0 +1,29 @@
+# Binaries
+/bin/
+/main
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test & coverage
+*.test
+*.out
+coverage.html
+
+# Environment (never commit secrets)
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Go workspace (if used later)
+go.work
+go.work.sum
