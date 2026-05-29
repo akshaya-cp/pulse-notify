@@ -38,8 +38,8 @@ Inspired by patterns from projects like [go-notify](https://github.com/Harry-027
 ## Quick start
 
 ```bash
-git clone <your-repo-url>
-cd golang_project
+git clone https://github.com/akshaya-cp/pulse-notify.git
+cd pulse-notify
 
 cp .env.example .env
 
