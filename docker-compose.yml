@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pulse-notify-postgres
+    environment:
+      POSTGRES_USER: pulse
+      POSTGRES_PASSWORD: pulse
+      POSTGRES_DB: pulse_notify
+    ports:
+      - "5432:5432"
+    volumes:
+      - pulse_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulse -d pulse_notify"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pulse_postgres_data:

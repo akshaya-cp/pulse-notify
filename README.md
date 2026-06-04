@@ -9,15 +9,19 @@ Inspired by patterns from projects like [go-notify](https://github.com/Harry-027
 - HTTP API with [Gin](https://github.com/gin-gonic/gin)
 - Environment-based configuration (`.env` for local dev)
 - Structured logging with `log/slog` (text in dev, JSON in production)
-- `GET /health` for liveness checks
+- `GET /health` — includes PostgreSQL ping
+- PostgreSQL user storage with auto-migration on startup
+- `POST /api/v1/auth/signup` and `POST /api/v1/auth/login`
+- bcrypt password hashing
+- JWT access tokens + `GET /api/v1/me` (protected)
 - Graceful shutdown on `SIGINT` / `SIGTERM`
 
 ## Planned capabilities
 
 | Area | Status |
 |------|--------|
-| PostgreSQL + user signup/login | Upcoming |
-| JWT access tokens + refresh flow | Upcoming |
+| JWT refresh tokens + logout | Upcoming |
+| Role-based access control (admin routes) | Upcoming |
 | Role-based access control | Upcoming |
 | Notification APIs + async workers | Upcoming |
 | Kafka (or RabbitMQ) producer/consumer | Upcoming |
@@ -26,14 +30,14 @@ Inspired by patterns from projects like [go-notify](https://github.com/Harry-027
 
 ## Tech stack
 
-**Current:** Go, Gin, structured logging (`slog`)
+**Current:** Go, Gin, PostgreSQL (pgx), JWT, bcrypt, Docker Compose (Postgres)
 
-**Roadmap:** PostgreSQL, Redis, Kafka or RabbitMQ, JWT, Docker
+**Roadmap:** Redis, Kafka or RabbitMQ, refresh tokens, rate limiting
 
 ## Requirements
 
 - Go 1.22+ (project uses 1.26)
-- Make optional; plain `go` commands work fine
+- Docker (for local PostgreSQL)
 
 ## Quick start
 
@@ -43,11 +47,31 @@ cd pulse-notify
 
 cp .env.example .env
 
+docker compose up -d
+
 go mod download
 go run ./cmd/api
 ```
 
-In another terminal:
+### Try auth APIs
+
+```bash
+# Signup
+curl -s -X POST http://localhost:8080/api/v1/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{"email":"demo@example.com","password":"password123","name":"Demo User"}'
+
+# Login
+curl -s -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"demo@example.com","password":"password123"}'
+
+# Protected profile (replace TOKEN)
+curl -s http://localhost:8080/api/v1/me \
+  -H "Authorization: Bearer TOKEN"
+```
+
+Health check:
 
 ```bash
 curl http://localhost:8080/health
@@ -59,6 +83,7 @@ Example response:
 {
   "status": "ok",
   "service": "pulse-notify-api",
+  "database": "up",
   "uptime": "12s",
   "timestamp": "2026-05-29T12:00:00Z"
 }
@@ -79,17 +104,37 @@ go build -o bin/api ./cmd/api
 | `HTTP_HOST` | `0.0.0.0` | Bind address |
 | `HTTP_PORT` | `8080` | Server port |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `DATABASE_URL` | — | PostgreSQL connection string (required) |
+| `JWT_SECRET` | — | HMAC secret, min 32 characters (required) |
+| `JWT_ACCESS_TTL` | `15m` | Access token lifetime |
+
+## API overview
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/health` | No | Liveness + DB ping |
+| POST | `/api/v1/auth/signup` | No | Register user |
+| POST | `/api/v1/auth/login` | No | Login |
+| GET | `/api/v1/me` | Bearer JWT | Current user profile |
 
 ## Project layout
 
 ```
 cmd/api/              Application entrypoint
 internal/
+  auth/               Password hashing + JWT
   config/             Env configuration
-  handler/            HTTP handlers (health, auth later, etc.)
+  database/           Postgres pool + migrations
+  handler/            HTTP handlers
+  middleware/         JWT auth middleware
+  model/              Domain models
+  repository/         Database access
+  service/            Business logic
   logger/             slog setup
-  router/             Route registration + middleware
+  router/             Route registration
   server/             HTTP server lifecycle
+migrations/           SQL schema reference
+docker-compose.yml    Local PostgreSQL
 ```
 
 `internal/` keeps application code private to this module—a common Go convention for services meant to evolve without leaking implementation details.

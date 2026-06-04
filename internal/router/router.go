@@ -4,23 +4,46 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/akshaya-cp/golang_project/internal/auth"
 	"github.com/akshaya-cp/golang_project/internal/config"
 	"github.com/akshaya-cp/golang_project/internal/handler"
+	"github.com/akshaya-cp/golang_project/internal/middleware"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Deps groups handlers and shared dependencies for route registration.
+type Deps struct {
+	Config      *config.Config
+	Log         *slog.Logger
+	DB          *pgxpool.Pool
+	TokenMgr    *auth.TokenManager
+	Health      *handler.HealthHandler
+	Auth        *handler.AuthHandler
+}
+
 // New wires HTTP routes and middleware for the API server.
-func New(cfg *config.Config, log *slog.Logger) *gin.Engine {
-	if !cfg.IsDevelopment() {
+func New(deps Deps) *gin.Engine {
+	if !deps.Config.IsDevelopment() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
 	r := gin.New()
 	r.Use(gin.Recovery())
-	r.Use(requestLogger(log))
+	r.Use(requestLogger(deps.Log))
 
-	health := handler.NewHealthHandler()
-	r.GET("/health", health.Check)
+	r.GET("/health", deps.Health.Check)
+
+	v1 := r.Group("/api/v1")
+	{
+		authRoutes := v1.Group("/auth")
+		authRoutes.POST("/signup", deps.Auth.Signup)
+		authRoutes.POST("/login", deps.Auth.Login)
+
+		protected := v1.Group("")
+		protected.Use(middleware.JWT(deps.TokenMgr))
+		protected.GET("/me", deps.Auth.Me)
+	}
 
 	return r
 }
@@ -40,7 +63,6 @@ func requestLogger(log *slog.Logger) gin.HandlerFunc {
 	}
 }
 
-// Small indirections keep handler tests simple later without pulling in time in every test.
 var timeNow = func() time.Time { return time.Now() }
 
 func timeSinceMs(start time.Time) int64 {

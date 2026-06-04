@@ -14,22 +14,25 @@ import (
 	"github.com/akshaya-cp/golang_project/internal/config"
 	"github.com/akshaya-cp/golang_project/internal/router"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Server wraps the HTTP server and Gin engine.
 type Server struct {
 	cfg    *config.Config
 	log    *slog.Logger
+	db     *pgxpool.Pool
 	engine *gin.Engine
 	http   *http.Server
 }
 
-func New(cfg *config.Config, log *slog.Logger) *Server {
-	engine := router.New(cfg, log)
+func New(cfg *config.Config, log *slog.Logger, deps router.Deps) *Server {
+	engine := router.New(deps)
 
 	return &Server{
 		cfg:    cfg,
 		log:    log,
+		db:     deps.DB,
 		engine: engine,
 		http: &http.Server{
 			Addr:         cfg.Addr(),
@@ -67,6 +70,11 @@ func (s *Server) Run() error {
 
 	if err := s.http.Shutdown(ctx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
+	}
+
+	if s.db != nil {
+		s.db.Close()
+		s.log.Info("database connection closed")
 	}
 
 	s.log.Info("server stopped gracefully")
