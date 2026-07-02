@@ -30,11 +30,16 @@ type loginRequest struct {
 	Password string `json:"password" binding:"required"`
 }
 
+type refreshRequest struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
 type tokenResponse struct {
-	AccessToken string      `json:"access_token"`
-	TokenType   string      `json:"token_type"`
-	ExpiresIn   int64       `json:"expires_in"`
-	User        interface{} `json:"user"`
+	AccessToken  string      `json:"access_token"`
+	RefreshToken string      `json:"refresh_token"`
+	TokenType    string      `json:"token_type"`
+	ExpiresIn    int64       `json:"expires_in"`
+	User         interface{} `json:"user"`
 }
 
 // Signup registers a new user and returns an access token.
@@ -79,6 +84,43 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, buildTokenResponse(result))
 }
 
+// Refresh exchanges a valid refresh token for a new access/refresh token pair.
+func (h *AuthHandler) Refresh(c *gin.Context) {
+	var req refreshRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	result, err := h.auth.Refresh(c.Request.Context(), req.RefreshToken)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidRefresh) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired refresh token"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not refresh token"})
+		return
+	}
+
+	c.JSON(http.StatusOK, buildTokenResponse(result))
+}
+
+// Logout revokes the supplied refresh token.
+func (h *AuthHandler) Logout(c *gin.Context) {
+	var req refreshRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.auth.Logout(c.Request.Context(), req.RefreshToken); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not logout"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
+}
+
 // Me returns the authenticated user's profile (protected route).
 func (h *AuthHandler) Me(c *gin.Context) {
 	userID, ok := middleware.UserIDFromContext(c)
@@ -107,9 +149,10 @@ func buildTokenResponse(result *service.AuthResult) tokenResponse {
 	}
 
 	return tokenResponse{
-		AccessToken: result.AccessToken,
-		TokenType:   "Bearer",
-		ExpiresIn:   expiresIn,
-		User:        result.User,
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    expiresIn,
+		User:         result.User,
 	}
 }

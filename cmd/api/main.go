@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/akshaya-cp/golang_project/internal/auth"
+	"github.com/akshaya-cp/golang_project/internal/cache"
 	"github.com/akshaya-cp/golang_project/internal/config"
 	"github.com/akshaya-cp/golang_project/internal/database"
+	"github.com/akshaya-cp/golang_project/internal/events"
 	"github.com/akshaya-cp/golang_project/internal/handler"
 	"github.com/akshaya-cp/golang_project/internal/logger"
 	"github.com/akshaya-cp/golang_project/internal/repository"
@@ -41,21 +43,48 @@ func main() {
 	}
 	appLog.Info("database connected and migrated")
 
+	redisClient, err := cache.Connect(ctx, cfg.RedisURL)
+	if err != nil {
+		appLog.Error("redis connection failed", "error", err)
+		db.Close()
+		os.Exit(1)
+	}
+	appLog.Info("redis connected")
+
+	producer := events.NewProducer(cfg.KafkaBrokers, cfg.KafkaTopic)
+	appLog.Info("kafka producer ready", "brokers", cfg.KafkaBrokers, "topic", cfg.KafkaTopic)
+
 	tokenMgr := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTAccessTTL)
 	userRepo := repository.NewUserRepository(db)
-	authSvc := service.NewAuthService(userRepo, tokenMgr)
+	notifRepo := repository.NewNotificationRepository(db)
+
+	authSvc := service.NewAuthService(userRepo, tokenMgr, redisClient, cfg.JWTRefreshTTL)
+	notifSvc := service.NewNotificationService(notifRepo, producer, redisClient, appLog)
 
 	deps := router.Deps{
-		Config:   cfg,
-		Log:      appLog,
-		DB:       db,
-		TokenMgr: tokenMgr,
-		Health:   handler.NewHealthHandler(db),
-		Auth:     handler.NewAuthHandler(authSvc),
+		Config:       cfg,
+		Log:          appLog,
+		DB:           db,
+		Cache:        redisClient,
+		TokenMgr:     tokenMgr,
+		Health:       handler.NewHealthHandler(db, redisClient),
+		Auth:         handler.NewAuthHandler(authSvc),
+		Notification: handler.NewNotificationHandler(notifSvc),
 	}
 
 	srv := server.New(cfg, appLog, deps)
-	if err := srv.Run(); err != nil {
+
+	err = srv.Run()
+
+	// Release resources the server did not own.
+	if cerr := producer.Close(); cerr != nil {
+		appLog.Warn("kafka producer close failed", "error", cerr)
+	}
+	if cerr := redisClient.Close(); cerr != nil {
+		appLog.Warn("redis close failed", "error", cerr)
+	}
+
+	if err != nil {
 		appLog.Error("server exited with error", "error", err)
 		os.Exit(1)
 	}
